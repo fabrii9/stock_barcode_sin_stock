@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-inherit="stock_barcode.LineTitle" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_product_label')]" position="after">
+            <div t-if="line.sin_stock" class="o_sin_stock_badge">
+                SIN STOCK EN UBICACIÓN
+            </div>
+        </xpath>
+    </t>
+</templates>

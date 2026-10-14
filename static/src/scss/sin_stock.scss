@@ -1,0 +1,22 @@
+.o_barcode_line.o_line_sin_stock {
+    background-color: #f8d7da !important;
+    border-left: 8px solid #dc3545 !important;
+    color: #842029;
+
+    .o_product_ref,
+    .o_product_label,
+    .o_barcode_line_title {
+        color: #842029 !important;
+    }
+
+    .o_sin_stock_badge {
+        display: inline-block;
+        margin-top: 4px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background-color: #dc3545;
+        color: #fff;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+}
