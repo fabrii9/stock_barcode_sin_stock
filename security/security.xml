@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="group_validar_parcial_sin_stock" model="res.groups">
+        <field name="name">Barcode: validar parcial con faltantes</field>
+        <field name="category_id" ref="base.module_category_inventory_inventory"/>
+        <field name="comment">Puede validar desde la app de códigos de barra un picking que tiene productos sin stock (se genera un pedido parcial).</field>
+    </record>
+
+    <!-- Los responsables de stock lo reciben automáticamente. -->
+    <record id="stock.group_stock_manager" model="res.groups">
+        <field name="implied_ids" eval="[(4, ref('group_validar_parcial_sin_stock'))]"/>
+    </record>
+</odoo>

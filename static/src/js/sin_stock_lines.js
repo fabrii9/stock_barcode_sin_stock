@@ -3,9 +3,11 @@
 import { patch } from "@web/core/utils/patch";
 import BarcodePickingModel from "@stock_barcode/models/barcode_picking_model";
 import LineComponent from "@stock_barcode/components/line";
-import MainComponent from "@stock_barcode/components/main";
 import { BackorderDialog } from "@stock_barcode/components/backorder_dialog";
 import { _t } from "@web/core/l10n/translation";
+import { user } from "@web/core/user";
+
+const PARTIAL_GROUP = "stock_barcode_sin_stock.group_validar_parcial_sin_stock";
 
 /**
  * Agrega un renglón "fantasma" por cada movimiento del picking que no tiene
@@ -53,46 +55,70 @@ patch(BarcodePickingModel.prototype, {
         return lines;
     },
 
-    /**
-     * Cuando el operario encuentra físicamente el producto, el renglón pasa a
-     * ser una línea normal (se crea la línea de operación al guardar).
-     */
-    _confirmSinStockLine(line) {
-        if (!line || !line.sin_stock) {
-            return;
-        }
-        line.sin_stock = false;
-        if (!this.linesToSave.includes(line.virtual_id)) {
-            this.linesToSave.push(line.virtual_id);
-        }
+    // Un renglón sin stock es solo informativo: no se escanea, no se edita ni se completa.
+    _notifySinStock(line) {
+        this.notification(
+            _t("%s no tiene stock en %s. Corregir el stock antes de procesarlo.",
+                line.product_id.display_name, line.location_id.display_name),
+            { type: "danger" }
+        );
     },
 
-    _findLine(barcodeData) {
-        const found = super._findLine(...arguments);
-        if (found && found.sin_stock) {
-            this._confirmSinStockLine(found);
-            this.notification(
-                _t("%s no tiene stock en el sistema: se registra igual.", barcodeData.product.display_name),
-                { type: "warning" }
-            );
+    async updateLine(line) {
+        if (line && line.sin_stock) {
+            this._notifySinStock(line);
+            return;
         }
-        return found;
+        return super.updateLine(...arguments);
+    },
+
+    _updateLineQty(line) {
+        if (line && line.sin_stock) {
+            return;
+        }
+        return super._updateLineQty(...arguments);
     },
 
     updateLineQty(virtualId) {
-        this._confirmSinStockLine(this.pageLines.find((l) => l.virtual_id === virtualId));
+        const line = this.pageLines.find((l) => l.virtual_id === virtualId);
+        if (line && line.sin_stock) {
+            this._notifySinStock(line);
+            return;
+        }
         return super.updateLineQty(...arguments);
     },
 
+    lineCanBeEdited(line) {
+        return line && line.sin_stock ? false : super.lineCanBeEdited(...arguments);
+    },
+
+    lineCanBeDeleted(line) {
+        return line && line.sin_stock ? false : super.lineCanBeDeleted(...arguments);
+    },
+
     /**
-     * Si hay renglones sin stock y todavía no se procesó nada, el estándar
-     * valida sin preguntar y genera el pedido parcial. Acá se pide confirmación.
+     * No se puede validar un picking con renglones sin stock, salvo los
+     * usuarios del grupo "validar parcial con faltantes", que reciben el
+     * diálogo de pedido parcial.
      */
     async validate() {
         const lines = this.currentState.lines;
-        const hasSinStock = lines.some((l) => l.sin_stock);
+        const sinStock = lines.filter((l) => l.sin_stock);
+        if (!sinStock.length) {
+            return super.validate(...arguments);
+        }
+        const canForce = await user.hasGroup(PARTIAL_GROUP);
+        if (!canForce) {
+            this.trigger("playSound");
+            this.notification(
+                _t("No se puede validar: %s producto(s) sin stock en %s. Corregir el stock o avisar a un supervisor.",
+                    sinStock.length, sinStock[0].location_id.display_name),
+                { type: "danger", sticky: true }
+            );
+            return;
+        }
         const nothingProcessed = !lines.some((l) => l.qty_done > 0);
-        if (this.config.create_backorder === "ask" && hasSinStock && nothingProcessed) {
+        if (this.config.create_backorder === "ask" && nothingProcessed) {
             this.trigger("playSound");
             return this.dialogService.add(BackorderDialog, {
                 displayUoM: this.groups.group_uom,
@@ -104,17 +130,14 @@ patch(BarcodePickingModel.prototype, {
     },
 });
 
-patch(MainComponent.prototype, {
-    async onOpenProductPage(line) {
-        if (line && line.sin_stock) {
-            this.env.model._confirmSinStockLine(line);
-        }
-        return super.onOpenProductPage(...arguments);
-    },
-});
-
 patch(LineComponent.prototype, {
     get componentClasses() {
         return [super.componentClasses, this.line.sin_stock ? "o_line_sin_stock" : ""].join(" ");
+    },
+    get displayIncrementButton() {
+        return this.line.sin_stock ? false : super.displayIncrementButton;
+    },
+    get displayFulfillbutton() {
+        return this.line.sin_stock ? false : super.displayFulfillbutton;
     },
 });
