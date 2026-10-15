@@ -50,6 +50,7 @@ patch(BarcodePickingModel.prototype, {
                 reserved_uom_qty: move.product_uom_qty,
                 quantity: 0,
                 sin_stock: true,
+                sin_stock_disponible: move.sin_stock_disponible || [],
             });
         }
         return lines;

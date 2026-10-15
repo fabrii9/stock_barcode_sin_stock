@@ -5,6 +5,15 @@
             <div t-if="line.sin_stock" class="o_sin_stock_badge">
                 SIN STOCK EN <t t-esc="line.location_id.display_name"/>
             </div>
+            <div t-if="line.sin_stock" class="o_sin_stock_disponible">
+                <t t-if="line.sin_stock_disponible and line.sin_stock_disponible.length">
+                    <span class="o_sin_stock_disponible_title">Sí disponible:</span>
+                    <t t-foreach="line.sin_stock_disponible" t-as="label" t-key="label_index">
+                        <span class="o_sin_stock_disponible_item" t-esc="label"/>
+                    </t>
+                </t>
+                <span t-else="" class="o_sin_stock_disponible_none">Sin stock en ningún depósito</span>
+            </div>
         </xpath>
     </t>
 

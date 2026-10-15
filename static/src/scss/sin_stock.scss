@@ -19,4 +19,30 @@
         font-weight: 700;
         letter-spacing: 0.5px;
     }
+
+    .o_sin_stock_disponible {
+        margin-top: 6px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        font-weight: 600;
+    }
+
+    .o_sin_stock_disponible_title {
+        color: #842029;
+    }
+
+    .o_sin_stock_disponible_item {
+        padding: 2px 8px;
+        border-radius: 4px;
+        background-color: #198754;
+        color: #fff;
+        font-weight: 700;
+    }
+
+    .o_sin_stock_disponible_none {
+        color: #842029;
+        font-style: italic;
+    }
 }
