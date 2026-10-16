@@ -46,3 +46,27 @@
         font-style: italic;
     }
 }
+
+// Amarillo: hay stock en el origen, pero reservado para otros pedidos.
+.o_barcode_line.o_line_sin_stock.o_line_sin_stock_reservado {
+    background-color: #fff3cd !important;
+    border-left-color: #ffc107 !important;
+    color: #664d03;
+
+    .o_product_ref,
+    .o_product_label,
+    .o_barcode_line_title,
+    .o_sin_stock_disponible_title {
+        color: #664d03 !important;
+    }
+
+    .o_sin_stock_badge {
+        background-color: #ffc107;
+        color: #000;
+    }
+
+    .o_sin_stock_detalle {
+        margin-top: 4px;
+        font-weight: 600;
+    }
+}

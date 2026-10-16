@@ -3,16 +3,23 @@
     <t t-inherit="stock_barcode.LineTitle" t-inherit-mode="extension">
         <xpath expr="//div[hasclass('o_product_label')]" position="after">
             <div t-if="line.sin_stock" class="o_sin_stock_badge">
-                SIN STOCK EN <t t-esc="line.location_id.display_name"/>
+                <t t-if="line.sin_stock_info.state === 'none'">SIN STOCK EN <t t-esc="line.location_id.display_name"/></t>
+                <t t-elif="line.sin_stock_info.state === 'reserved'">STOCK RESERVADO PARA OTROS PEDIDOS</t>
+                <t t-else="">HAY STOCK LIBRE PERO NO SE PUDO RESERVAR</t>
+            </div>
+            <div t-if="line.sin_stock and line.sin_stock_info.state !== 'none'" class="o_sin_stock_detalle">
+                En <t t-esc="line.location_id.display_name"/>: en mano <t t-esc="line.sin_stock_info.on_hand"/>,
+                reservado <t t-esc="line.sin_stock_info.reserved"/>
+                <t t-if="line.sin_stock_info.pickings.length"> (<t t-esc="line.sin_stock_info.pickings.join(', ')"/>)</t>
             </div>
             <div t-if="line.sin_stock" class="o_sin_stock_disponible">
-                <t t-if="line.sin_stock_disponible and line.sin_stock_disponible.length">
+                <t t-if="line.sin_stock_info.others and line.sin_stock_info.others.length">
                     <span class="o_sin_stock_disponible_title">Sí disponible:</span>
-                    <t t-foreach="line.sin_stock_disponible" t-as="label" t-key="label_index">
+                    <t t-foreach="line.sin_stock_info.others" t-as="label" t-key="label_index">
                         <span class="o_sin_stock_disponible_item" t-esc="label"/>
                     </t>
                 </t>
-                <span t-else="" class="o_sin_stock_disponible_none">Sin stock en ningún depósito</span>
+                <span t-elif="line.sin_stock_info.state === 'none'" class="o_sin_stock_disponible_none">Sin stock en ningún depósito</span>
             </div>
         </xpath>
     </t>

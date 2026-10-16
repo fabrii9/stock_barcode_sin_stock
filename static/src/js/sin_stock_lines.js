@@ -50,7 +50,7 @@ patch(BarcodePickingModel.prototype, {
                 reserved_uom_qty: move.product_uom_qty,
                 quantity: 0,
                 sin_stock: true,
-                sin_stock_disponible: move.sin_stock_disponible || [],
+                sin_stock_info: move.sin_stock_info || { state: 'none', others: [], pickings: [] },
             });
         }
         return lines;
@@ -59,7 +59,7 @@ patch(BarcodePickingModel.prototype, {
     // Un renglón sin stock es solo informativo: no se escanea, no se edita ni se completa.
     _notifySinStock(line) {
         this.notification(
-            _t("%s no tiene stock en %s. Corregir el stock antes de procesarlo.",
+            _t("%s no se puede procesar en %s (sin stock o reservado para otros pedidos).",
                 line.product_id.display_name, line.location_id.display_name),
             { type: "danger" }
         );
@@ -133,7 +133,7 @@ patch(BarcodePickingModel.prototype, {
 
 patch(LineComponent.prototype, {
     get componentClasses() {
-        return [super.componentClasses, this.line.sin_stock ? "o_line_sin_stock" : ""].join(" ");
+        return [super.componentClasses, this.line.sin_stock ? "o_line_sin_stock" : "", this.line.sin_stock && this.line.sin_stock_info.state !== "none" ? "o_line_sin_stock_reservado" : ""].join(" ");
     },
     get displayIncrementButton() {
         return this.line.sin_stock ? false : super.displayIncrementButton;
