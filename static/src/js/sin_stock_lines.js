@@ -3,11 +3,10 @@
 import { patch } from "@web/core/utils/patch";
 import BarcodePickingModel from "@stock_barcode/models/barcode_picking_model";
 import LineComponent from "@stock_barcode/components/line";
-import { BackorderDialog } from "@stock_barcode/components/backorder_dialog";
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
+import { markup } from "@odoo/owl";
+import { escape } from "@web/core/utils/strings";
 import { _t } from "@web/core/l10n/translation";
-import { user } from "@web/core/user";
-
-const PARTIAL_GROUP = "stock_barcode_sin_stock.group_validar_parcial_sin_stock";
 
 /**
  * Agrega un renglón "fantasma" por cada movimiento del picking que no tiene
@@ -98,9 +97,8 @@ patch(BarcodePickingModel.prototype, {
     },
 
     /**
-     * No se puede validar un picking con renglones sin stock, salvo los
-     * usuarios del grupo "validar parcial con faltantes", que reciben el
-     * diálogo de pedido parcial.
+     * Cualquier usuario puede validar un picking con faltantes, pero siempre
+     * ve un cartel que aclara que es una ENTREGA PARCIAL y debe confirmarlo.
      */
     async validate() {
         const lines = this.currentState.lines;
@@ -108,26 +106,41 @@ patch(BarcodePickingModel.prototype, {
         if (!sinStock.length) {
             return super.validate(...arguments);
         }
-        const canForce = await user.hasGroup(PARTIAL_GROUP);
-        if (!canForce) {
-            this.trigger("playSound");
-            this.notification(
-                _t("No se puede validar: %s producto(s) sin stock en %s. Corregir el stock o avisar a un supervisor.",
-                    sinStock.length, sinStock[0].location_id.display_name),
-                { type: "danger", sticky: true }
-            );
-            return;
+        const pending = lines.filter((l) => l.reserved_uom_qty > l.qty_done);
+        const items = pending.slice(0, 10).map((l) => {
+            const code = l.product_id.default_code || l.product_id.display_name;
+            const missing = l.reserved_uom_qty - l.qty_done;
+            const tag = l.sin_stock ? " — SIN STOCK" : "";
+            return `• ${escape(code)}: faltan ${missing} de ${l.reserved_uom_qty}${tag}`;
+        });
+        if (pending.length > items.length) {
+            items.push(`… y ${pending.length - items.length} más`);
         }
-        const nothingProcessed = !lines.some((l) => l.qty_done > 0);
-        if (this.config.create_backorder === "ask" && nothingProcessed) {
-            this.trigger("playSound");
-            return this.dialogService.add(BackorderDialog, {
-                displayUoM: this.groups.group_uom,
-                uncompletedLines: lines.filter((l) => l.reserved_uom_qty > l.qty_done),
-                onApply: () => super.validate(...arguments),
-            });
-        }
-        return super.validate(...arguments);
+        const body = markup(
+            `<strong>Estás por validar una ENTREGA PARCIAL.</strong><br/>` +
+            `${sinStock.length} producto(s) sin stock en ${escape(sinStock[0].location_id.display_name)} ` +
+            `y ${pending.length} con cantidades pendientes. Lo que falta quedará ` +
+            `pendiente en un nuevo pedido (backorder).<br/><br/>` +
+            items.join("<br/>")
+        );
+        this.trigger("playSound");
+        this.dialogService.add(ConfirmationDialog, {
+            title: _t("ENTREGA PARCIAL"),
+            body,
+            confirmLabel: _t("Validar entrega parcial"),
+            cancelLabel: _t("Volver"),
+            confirm: async () => {
+                // Este cartel reemplaza al diálogo estándar de pedido parcial.
+                const previous = this.showBackOrderDialog;
+                this.showBackOrderDialog = false;
+                try {
+                    await super.validate();
+                } finally {
+                    this.showBackOrderDialog = previous;
+                }
+            },
+            cancel: () => {},
+        });
     },
 });
 
