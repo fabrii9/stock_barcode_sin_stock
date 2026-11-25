@@ -2,6 +2,7 @@
 from collections import defaultdict
 
 from odoo import api, fields, models
+from odoo.tools import float_compare
 
 
 def _fmt(value):
@@ -14,17 +15,28 @@ class StockMove(models.Model):
     sin_stock_info = fields.Json(
         string="Detalle de falta de stock",
         compute="_compute_sin_stock_info",
-        help="Para movimientos sin reserva: estado (rojo = sin stock en el "
-             "origen, amarillo = hay stock pero no se pudo reservar), cantidades "
-             "en el origen y stock disponible en los demás depósitos.",
+        help="Para movimientos con faltante (sin reserva o con reserva parcial): "
+             "estado (rojo = sin stock en el origen, amarillo = hay stock pero no "
+             "se pudo reservar), cantidad pedida y faltante, cantidades en el "
+             "origen y stock disponible en los demás depósitos.",
     )
 
-    @api.depends("product_id", "location_id", "state", "move_line_ids")
+    def _sin_stock_missing_qty(self):
+        """Lo que falta reservar del movimiento, en su UdM (0 si está completo)."""
+        self.ensure_one()
+        missing = self.product_uom_qty - self.quantity
+        if float_compare(missing, 0, precision_rounding=self.product_uom.rounding) <= 0:
+            return 0.0
+        return missing
+
+    @api.depends("product_id", "location_id", "state", "product_uom_qty",
+                 "quantity", "move_line_ids")
     def _compute_sin_stock_info(self):
-        # Solo interesan los movimientos esperando mercadería y sin línea de operación.
+        # Interesan los movimientos esperando mercadería a los que les falta
+        # reservar algo: sin ninguna línea (todo falta) o con reserva parcial.
         moves = self.filtered(
-            lambda m: not m.move_line_ids
-            and m.state in ("confirmed", "partially_available", "waiting")
+            lambda m: m.state in ("confirmed", "partially_available", "waiting")
+            and m._sin_stock_missing_qty() > 0
         )
         (self - moves).sin_stock_info = False
         if not moves:
@@ -78,13 +90,23 @@ class StockMove(models.Model):
                 product.id, (0.0, 0.0)
             )
             on_hand, reserved = conv(on_hand), conv(reserved)
+            # Lo que este mismo movimiento ya tiene reservado en el origen no es
+            # "stock de otros pedidos": se descuenta para decidir el color.
+            own = conv(sum(
+                move.move_line_ids.filtered(
+                    lambda ml: ml.location_id.parent_path.startswith(
+                        move.location_id.parent_path
+                    )
+                ).mapped("quantity_product_uom")
+            ))
+            reserved_others = max(reserved - own, 0.0)
             free = on_hand - reserved
             if free > 0:
                 state = "free"       # hay libre pero no se pudo reservar
-            elif on_hand > 0:
+            elif on_hand - own > 0:
                 state = "reserved"   # hay stock, pero comprometido con otros pedidos
             else:
-                state = "none"       # sin stock físico
+                state = "none"       # sin stock físico (o solo lo ya reservado acá)
             pickings = set()
             for (loc_id, prod_id), names in reservers.items():
                 if prod_id == product.id and (
@@ -94,6 +116,8 @@ class StockMove(models.Model):
                     )
                 ):
                     pickings |= names
+            pickings.discard(move.picking_id.name)
+            missing = move._sin_stock_missing_qty()
             others = []
             for wh in warehouses:
                 qty, res = wh_stock[wh.id].get(product.id, (0.0, 0.0))
@@ -103,10 +127,15 @@ class StockMove(models.Model):
             move.sin_stock_info = {
                 "state": state,
                 "on_hand": _fmt(on_hand),
-                "reserved": _fmt(reserved),
+                "reserved": _fmt(reserved_others),
                 "free": _fmt(free),
                 "pickings": sorted(pickings)[:5],
                 "others": others,
+                # Pedido completo vs. lo que falta (en la UdM del movimiento).
+                "partial": bool(move.move_line_ids),
+                "demand": _fmt(move.product_uom_qty),
+                "missing": _fmt(missing),
+                "missing_qty": missing,
             }
 
     def _get_fields_stock_barcode(self):

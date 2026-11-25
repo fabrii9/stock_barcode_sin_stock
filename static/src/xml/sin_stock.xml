@@ -2,14 +2,18 @@
 <templates xml:space="preserve">
     <t t-inherit="stock_barcode.LineTitle" t-inherit-mode="extension">
         <xpath expr="//div[hasclass('o_product_label')]" position="after">
+            <div t-if="line.sin_stock and line.sin_stock_partial" class="o_sin_stock_badge o_sin_stock_faltan">
+                FALTAN <t t-esc="line.sin_stock_info.missing"/> DE <t t-esc="line.sin_stock_info.demand"/> PEDIDOS
+            </div>
             <div t-if="line.sin_stock" class="o_sin_stock_badge">
-                <t t-if="line.sin_stock_info.state === 'none'">SIN STOCK EN <t t-esc="line.location_id.display_name"/></t>
+                <t t-if="line.sin_stock_partial and line.sin_stock_info.state === 'none'">NO HAY MÁS STOCK EN <t t-esc="line.location_id.display_name"/></t>
+                <t t-elif="line.sin_stock_info.state === 'none'">SIN STOCK EN <t t-esc="line.location_id.display_name"/></t>
                 <t t-elif="line.sin_stock_info.state === 'reserved'">STOCK RESERVADO PARA OTROS PEDIDOS</t>
                 <t t-else="">HAY STOCK LIBRE PERO NO SE PUDO RESERVAR</t>
             </div>
             <div t-if="line.sin_stock and line.sin_stock_info.state !== 'none'" class="o_sin_stock_detalle">
                 En <t t-esc="line.location_id.display_name"/>: en mano <t t-esc="line.sin_stock_info.on_hand"/>,
-                reservado <t t-esc="line.sin_stock_info.reserved"/>
+                reservado para otros <t t-esc="line.sin_stock_info.reserved"/>
                 <t t-if="line.sin_stock_info.pickings.length"> (<t t-esc="line.sin_stock_info.pickings.join(', ')"/>)</t>
             </div>
             <div t-if="line.sin_stock" class="o_sin_stock_disponible">

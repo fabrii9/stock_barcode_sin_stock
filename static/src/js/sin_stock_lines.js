@@ -9,8 +9,10 @@ import { escape } from "@web/core/utils/strings";
 import { _t } from "@web/core/l10n/translation";
 
 /**
- * Agrega un renglón "fantasma" por cada movimiento del picking que no tiene
- * ninguna línea de operación (es decir, sin stock reservado en la ubicación).
+ * Agrega un renglón "fantasma" por cada movimiento del picking al que le falta
+ * reservar mercadería: sin ninguna línea de operación (falta todo) o con
+ * reserva parcial (ej. pedido 6, reservado 3 → renglón rojo "FALTAN 3 DE 6").
+ * Así el operario siempre ve el pedido completo.
  * El renglón es solo visual: sin id y con qty_done = 0 nunca se guarda.
  */
 patch(BarcodePickingModel.prototype, {
@@ -22,12 +24,19 @@ patch(BarcodePickingModel.prototype, {
         }
         for (const moveId of picking.move_ids || []) {
             const move = this.cache.getRecord("stock.move", moveId);
-            if (!move || (move.move_line_ids || []).length || !move.product_uom_qty) {
+            if (!move || !move.product_uom_qty) {
                 continue;
             }
             if (move.state === "cancel" || move.state === "done") {
                 continue;
             }
+            const hasLines = (move.move_line_ids || []).length > 0;
+            const info = move.sin_stock_info;
+            // Con reserva parcial solo se agrega si el servidor informa faltante.
+            if (hasLines && !(info && info.missing_qty > 0)) {
+                continue;
+            }
+            const missingQty = hasLines ? info.missing_qty : move.product_uom_qty;
             const product = this.cache.getRecord("product.product", move.product_id);
             const location = this.cache.getRecord("stock.location", move.location_id);
             lines.push({
@@ -46,13 +55,42 @@ patch(BarcodePickingModel.prototype, {
                 result_package_id: false,
                 owner_id: false,
                 qty_done: 0,
-                reserved_uom_qty: move.product_uom_qty,
+                reserved_uom_qty: missingQty,
                 quantity: 0,
                 sin_stock: true,
-                sin_stock_info: move.sin_stock_info || { state: 'none', others: [], pickings: [] },
+                sin_stock_partial: hasLines,
+                sin_stock_demand: move.product_uom_qty,
+                sin_stock_info: info || { state: 'none', others: [], pickings: [] },
             });
         }
         return lines;
+    },
+
+    // Con reserva parcial, al escanear el producto tiene que sumar en el renglón
+    // real (el reservado), nunca en el renglón informativo de faltante.
+    _lineCannotBeTaken(line) {
+        if (line && line.sin_stock && line.sin_stock_partial) {
+            return true;
+        }
+        return super._lineCannotBeTaken(...arguments);
+    },
+
+    /**
+     * Faltante real de un renglón informativo: lo pedido menos lo que el
+     * operario ya cargó en los renglones reales del mismo movimiento (puede
+     * haber juntado más de lo reservado).
+     */
+    _sinStockMissing(line) {
+        const done = this.currentState.lines
+            .filter((l) => !l.sin_stock && l.move_id === line.move_id)
+            .reduce((sum, l) => sum + (l.qty_done || 0), 0);
+        if (!line.sin_stock_partial) {
+            return Math.max(line.reserved_uom_qty - done, 0);
+        }
+        const reserved = this.currentState.lines
+            .filter((l) => !l.sin_stock && l.move_id === line.move_id)
+            .reduce((sum, l) => sum + (l.reserved_uom_qty || 0), 0);
+        return Math.max(line.reserved_uom_qty - Math.max(done - reserved, 0), 0);
     },
 
     // Un renglón sin stock es solo informativo: no se escanea, no se edita ni se completa.
@@ -102,23 +140,41 @@ patch(BarcodePickingModel.prototype, {
      */
     async validate() {
         const lines = this.currentState.lines;
-        const sinStock = lines.filter((l) => l.sin_stock);
+        const sinStock = lines.filter((l) => l.sin_stock && this._sinStockMissing(l) > 0);
         if (!sinStock.length) {
-            return super.validate(...arguments);
+            const previous = this.showBackOrderDialog;
+            // Si los renglones informativos quedaron cubiertos (juntó más de lo
+            // reservado), no deben contar como pendientes en el diálogo estándar.
+            if (lines.some((l) => l.sin_stock)) {
+                this.showBackOrderDialog = lines.some(
+                    (l) => !l.sin_stock && l.reserved_uom_qty > l.qty_done
+                ) && previous;
+            }
+            try {
+                return await super.validate(...arguments);
+            } finally {
+                this.showBackOrderDialog = previous;
+            }
         }
-        const pending = lines.filter((l) => l.reserved_uom_qty > l.qty_done);
+        const pending = lines.filter((l) =>
+            l.sin_stock ? this._sinStockMissing(l) > 0 : l.reserved_uom_qty > l.qty_done
+        );
         const items = pending.slice(0, 10).map((l) => {
             const code = l.product_id.default_code || l.product_id.display_name;
+            if (l.sin_stock) {
+                const missing = this._sinStockMissing(l);
+                const tag = l.sin_stock_partial ? " — FALTA STOCK" : " — SIN STOCK";
+                return `• ${escape(code)}: faltan ${missing} de ${l.sin_stock_demand} pedidos${tag}`;
+            }
             const missing = l.reserved_uom_qty - l.qty_done;
-            const tag = l.sin_stock ? " — SIN STOCK" : "";
-            return `• ${escape(code)}: faltan ${missing} de ${l.reserved_uom_qty}${tag}`;
+            return `• ${escape(code)}: faltan ${missing} de ${l.reserved_uom_qty}`;
         });
         if (pending.length > items.length) {
             items.push(`… y ${pending.length - items.length} más`);
         }
         const body = markup(
             `<strong>Estás por validar una ENTREGA PARCIAL.</strong><br/>` +
-            `${sinStock.length} producto(s) sin stock en ${escape(sinStock[0].location_id.display_name)} ` +
+            `${sinStock.length} producto(s) con faltante de stock en ${escape(sinStock[0].location_id.display_name)} ` +
             `y ${pending.length} con cantidades pendientes. Lo que falta quedará ` +
             `pendiente en un nuevo pedido (backorder).<br/><br/>` +
             items.join("<br/>")

@@ -70,3 +70,12 @@
         font-weight: 600;
     }
 }
+
+// Reserva parcial: el pedido completo siempre a la vista ("FALTAN 3 DE 6 PEDIDOS").
+.o_barcode_line.o_line_sin_stock .o_sin_stock_badge.o_sin_stock_faltan {
+    display: block;
+    width: fit-content;
+    background-color: #dc3545 !important;
+    color: #fff !important;
+    font-size: 1.1em;
+}
