@@ -29,6 +29,53 @@ class StockMove(models.Model):
             return 0.0
         return missing
 
+    def _sin_stock_assign_picked(self):
+        """Reserva lo que falta de un movimiento ya "recogido" (picked).
+
+        Odoo 18 nunca reserva más en un movimiento picked (_action_assign lo
+        filtra), así que si el operario juntó lo que había y después entró
+        mercadería, el faltante queda sin reservar aunque haya stock libre.
+
+        Se fuerza la reserva del faltante y lo nuevo queda en líneas aparte SIN
+        marcar como recogidas: el operario ve "13/13 ya juntado" + "0/17 por
+        juntar". Odoo suma la reserva a la línea existente (aunque esté
+        recogida), por eso esa línea vuelve a su cantidad y la diferencia pasa
+        a una línea nueva."""
+        self.ensure_one()
+        move = self
+        if (
+            not move.picked
+            or move.state not in ("confirmed", "partially_available")
+            or move.move_orig_ids
+            or move._should_bypass_reservation()
+        ):
+            return
+        missing = move._sin_stock_missing_qty()
+        if not missing:
+            return
+        before = {ml: ml.quantity for ml in move.move_line_ids}
+        move._action_assign(force_qty=missing)
+        split_vals = []
+        for ml, qty in before.items():
+            extra = ml.quantity - qty
+            if float_compare(extra, 0, precision_rounding=ml.product_uom_id.rounding) <= 0:
+                continue
+            ml.quantity = qty
+            split_vals.append(dict(
+                move._prepare_move_line_vals(),
+                quantity=extra,
+                product_uom_id=ml.product_uom_id.id,
+                location_id=ml.location_id.id,
+                lot_id=ml.lot_id.id,
+                package_id=ml.package_id.id,
+                owner_id=ml.owner_id.id,
+                picked=False,
+            ))
+        if split_vals:
+            self.env["stock.move.line"].create(split_vals)
+        new_lines = move.move_line_ids.filtered(lambda ml: ml not in before and ml.picked)
+        new_lines.picked = False
+
     @api.depends("product_id", "location_id", "state", "product_uom_qty",
                  "quantity", "move_line_ids")
     def _compute_sin_stock_info(self):
